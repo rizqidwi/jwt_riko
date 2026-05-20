@@ -47,7 +47,6 @@
             color: white;
             cursor: pointer;
             font-size: 14px;
-            transition: background 0.3s;
         }
 
         .logout-btn:hover {
@@ -158,6 +157,7 @@
         .jwt-payload pre {
             margin: 0;
             white-space: pre-wrap;
+            word-break: break-all;
         }
 
         .transactions {
@@ -214,7 +214,7 @@
         <div class="header">
             <h1>💰 Mini-Wallet Dashboard</h1>
             <div class="user-info">
-                <span id="userDisplay"></span>
+                <span id="userDisplay">Loading...</span>
                 <button class="logout-btn" onclick="logout()">Logout</button>
             </div>
         </div>
@@ -222,7 +222,7 @@
         <div class="grid">
             <div class="card">
                 <h3>JWT Inspector</h3>
-                <div id="jwtInfo"></div>
+                <div id="jwtInfo">Loading JWT info...</div>
             </div>
 
             <div class="card">
@@ -270,6 +270,217 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script>
+        const API_BASE = 'http://localhost:3000/api/v1';
+        
+        // Cek token saat halaman dimuat
+        const token = localStorage.getItem('token');
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        
+        if (!token || !user.id) {
+            window.location.href = '/';
+        }
+        
+        // Tampilkan user info
+        document.getElementById('userDisplay').innerHTML = `${user.username} (${user.email})`;
+        
+        // Tampilkan JWT Inspector
+        function displayJWTInspector() {
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                const jwtInfo = document.getElementById('jwtInfo');
+                jwtInfo.innerHTML = `
+                    <div class="jwt-payload">
+                        <strong>🔑 Active JWT Token:</strong><br>
+                        <pre style="word-break: break-all;">${token.substring(0, 100)}...</pre>
+                        <hr>
+                        <strong>📦 Payload Data:</strong><br>
+                        <strong>User ID:</strong> ${payload.id}<br>
+                        <strong>Email:</strong> ${payload.email}<br>
+                        <strong>Username:</strong> ${payload.username}<br>
+                        <strong>Expires:</strong> ${new Date(payload.exp * 1000).toLocaleString()}<br>
+                        <strong>Issued At:</strong> ${new Date(payload.iat * 1000).toLocaleString()}
+                    </div>
+                `;
+            } catch (error) {
+                document.getElementById('jwtInfo').innerHTML = '<div class="jwt-payload" style="color: red;">Invalid JWT token format</div>';
+            }
+        }
+        
+        // Get auth headers
+        function getAuthHeaders() {
+            return {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            };
+        }
+        
+        // Load wallet data
+        async function loadWalletData() {
+            try {
+                const response = await fetch(`${API_BASE}/wallet/balance`, {
+                    headers: getAuthHeaders()
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('balance').innerHTML = `Rp ${data.data.balance.toLocaleString()}`;
+                    displayTransactions(data.data.transactions);
+                } else if (response.status === 401) {
+                    logout();
+                } else {
+                    console.error('Error:', data.message);
+                }
+            } catch (error) {
+                console.error('Network error:', error);
+            }
+        }
+        
+        // Display transactions
+        function displayTransactions(transactions) {
+            const transactionsDiv = document.getElementById('transactions');
+            
+            if (!transactions || transactions.length === 0) {
+                transactionsDiv.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">No transactions yet</div>';
+                return;
+            }
+            
+            transactionsDiv.innerHTML = transactions.map(t => {
+                let typeLabel = t.type;
+                let amountSign = '';
+                
+                if (t.type === 'TOPUP') {
+                    amountSign = '+';
+                    typeLabel = '💰 Top Up';
+                } else if (t.type === 'TRANSFER_IN') {
+                    amountSign = '+';
+                    typeLabel = '📥 Transfer Received';
+                } else if (t.type === 'TRANSFER_OUT') {
+                    amountSign = '-';
+                    typeLabel = '📤 Transfer Sent';
+                }
+                
+                return `
+                    <div class="transaction-item">
+                        <div>
+                            <div class="transaction-type ${t.type}">${typeLabel}</div>
+                            <div class="transaction-date">${new Date(t.timestamp).toLocaleString()}</div>
+                        </div>
+                        <div class="transaction-amount" style="color: ${t.type === 'TRANSFER_OUT' ? '#dc3545' : '#28a745'}">
+                            ${amountSign} Rp ${t.amount.toLocaleString()}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Refresh balance
+        async function refreshBalance() {
+            await loadWalletData();
+            showMessage('topupMessage', 'Balance refreshed!', false);
+            setTimeout(() => {
+                document.getElementById('topupMessage').style.display = 'none';
+            }, 2000);
+        }
+        
+        // Handle Top Up
+        async function handleTopUp(event) {
+            event.preventDefault();
+            
+            const amount = parseFloat(document.getElementById('topupAmount').value);
+            
+            if (isNaN(amount) || amount <= 0) {
+                showMessage('topupMessage', 'Please enter a valid amount greater than 0', true);
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/wallet/topup`, {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ amount })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage('topupMessage', `Top up successful! New balance: Rp ${data.data.balance.toLocaleString()}`, false);
+                    document.getElementById('topupAmount').value = '';
+                    await loadWalletData();
+                    
+                    setTimeout(() => {
+                        document.getElementById('topupMessage').style.display = 'none';
+                    }, 3000);
+                } else {
+                    showMessage('topupMessage', data.message, true);
+                }
+            } catch (error) {
+                showMessage('topupMessage', 'Network error. Please try again.', true);
+            }
+        }
+        
+        // Handle Transfer
+        async function handleTransfer(event) {
+            event.preventDefault();
+            
+            const target_email = document.getElementById('targetEmail').value;
+            const amount = parseFloat(document.getElementById('transferAmount').value);
+            
+            if (!target_email) {
+                showMessage('transferMessage', 'Please enter target email', true);
+                return;
+            }
+            
+            if (isNaN(amount) || amount <= 0) {
+                showMessage('transferMessage', 'Please enter a valid amount greater than 0', true);
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/wallet/transfer`, {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ target_email, amount })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage('transferMessage', `Transfer successful! Sent Rp ${amount.toLocaleString()} to ${target_email}`, false);
+                    document.getElementById('targetEmail').value = '';
+                    document.getElementById('transferAmount').value = '';
+                    await loadWalletData();
+                    
+                    setTimeout(() => {
+                        document.getElementById('transferMessage').style.display = 'none';
+                    }, 3000);
+                } else {
+                    showMessage('transferMessage', data.message, true);
+                }
+            } catch (error) {
+                showMessage('transferMessage', 'Network error. Please try again.', true);
+            }
+        }
+        
+        // Show message
+        function showMessage(elementId, message, isError) {
+            const msgDiv = document.getElementById(elementId);
+            msgDiv.textContent = message;
+            msgDiv.className = isError ? 'message error' : 'message success';
+            msgDiv.style.display = 'block';
+        }
+        
+        // Logout
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = '/';
+        }
+        
+        // Initialize dashboard
+        displayJWTInspector();
+        loadWalletData();
+    </script>
 </body>
 </html>

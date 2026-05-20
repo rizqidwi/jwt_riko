@@ -47,7 +47,7 @@ const logger = winston.createLogger({
   ]
 });
 
-// Make logger available globally in request
+// Make logger available in all requests
 app.use((req, res, next) => {
   req.logger = logger;
   next();
@@ -79,7 +79,7 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Routes
+// ============ ROUTES - PASTIKAN INI ADA ============
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/wallet', walletRoutes);
 
@@ -92,15 +92,20 @@ app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
-// 404 handler
+// Test endpoint untuk cek server
+app.get('/api/test', (req, res) => {
+  res.json({ success: true, message: 'Server is running' });
+});
+
+// 404 handler - letakkan di AKHIR sebelum error handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: 'Endpoint not found'
+    message: `Endpoint not found: ${req.method} ${req.url}`
   });
 });
 
-// Error handler
+// Global error handler
 app.use((err, req, res, next) => {
   logger.error(`Server error: ${err.message}`);
   res.status(500).json({
@@ -112,8 +117,14 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
-  console.log(`🚀 Server is running on http://localhost:${PORT}`);
+  console.log(`\n🚀 Server is running on http://localhost:${PORT}`);
   console.log(`📝 Logs are being saved to logs/ directory`);
+  console.log(`\n📋 Available endpoints:`);
+  console.log(`   POST   /api/v1/auth/register`);
+  console.log(`   POST   /api/v1/auth/login`);
+  console.log(`   GET    /api/v1/wallet/balance (protected)`);
+  console.log(`   POST   /api/v1/wallet/topup (protected)`);
+  console.log(`   POST   /api/v1/wallet/transfer (protected)\n`);
 });
 
 module.exports = { logger };
